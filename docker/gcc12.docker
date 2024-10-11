@@ -1,0 +1,449 @@
+# docker build -f docker/gcc12.docker --target boost-build -t boost-build-image .
+# docker build -f docker/gcc12.docker -t gcc12-env .
+# docker run -it gcc12-env /bin/bash
+#
+# docker rm $(docker ps -a -q)
+# docker image prune -f
+
+# ------------------------------------------------------------------------------------------------------------------
+# Use an official Ubuntu base image and install all necessary tools including GCC 12
+# ------------------------------------------------------------------------------------------------------------------
+FROM ubuntu:22.04 AS gcc12-init-build
+WORKDIR /tmp
+
+# Set environment variables for non-interactive installs and CPU core usage
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CPU_CORE_NUM=16
+
+# Update the package list, install essential build tools, GCC 12, and other dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential autoconf automake libtool autotools-dev pkg-config \
+    gcc-12 g++-12 \
+    git curl wget tcl \
+    libssl-dev zlib1g-dev libicu-dev libbz2-dev libpq-dev libcurl4-gnutls-dev \
+    libc-ares-dev libgoogle-perftools-dev libre2-dev \
+    python3 python3-dev \
+    ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set the default GCC version to GCC 12
+# Verify the installation of GCC and C++20 support (compile without linking)
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 12 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 12 && \
+    gcc --version && g++ --version && g++ -std=c++20 -c /dev/null
+
+# Install CMake
+RUN apt-get autoremove -y && \
+	mkdir /opt/cmake && \
+	cd /tmp && \
+	wget https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-linux-x86_64.sh && \
+	sh ./cmake-3.30.5-linux-x86_64.sh --prefix=/opt/cmake --skip-license && \
+	ln -f -s /opt/cmake/bin/cmake /usr/bin/cmake && \
+	rm -rf /tmp/cmake-3.30.5-linux-x86_64.sh
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# boost (library)
+#   https://www.boost.org/
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS boost-build
+WORKDIR /tmp
+
+# Install Boost
+RUN wget https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_1_86_0.tar.gz && \
+    tar -xzf boost_1_86_0.tar.gz && \
+    cd boost_1_86_0 && \
+    ./bootstrap.sh --prefix=/usr/local && \
+    ./b2 -j${CPU_CORE_NUM} && \
+    ./b2 install && \
+    cd /tmp && rm -rf /tmp/boost_1_86_0.tar.gz /tmp/boost_1_86_0
+
+# Copy Boost.Beast to /usr/local/include/boost
+RUN git clone --recursive --branch boost-1.86.0 https://github.com/boostorg/beast.git && \
+    cd /tmp/beast && \
+    cp -r include/boost/beast /usr/local/include/boost/ && \
+    cd /tmp && rm -rf /tmp/beast
+
+
+# -------------------------------------------------------------------------------------------------------------
+# fmt
+#   https://github.com/fmtlib/fmt
+#   https://fmt.dev/latest/usage.html#building-the-library
+# -------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS fmt-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch 11.0.2 https://github.com/fmtlib/fmt.git && \
+	cd /tmp/fmt && \
+	mkdir -p /tmp/fmt/build && cd /tmp/fmt/build && \
+	cmake -DBUILD_SHARED_LIBS=TRUE .. && \
+	cmake --build . --target install -j${CPU_CORE_NUM} && \
+	cd /tmp && rm -rf /tmp/fmt
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# spdlog (library)
+#   https://github.com/gabime/spdlog
+# ------------------------------------------------------------------------------------------------------------------
+FROM fmt-build AS spdlog-build
+WORKDIR /tmp
+RUN cd /tmp && \
+	env GIT_SSL_NO_VERIFY=true git clone --recursive --branch v1.14.1 https://github.com/gabime/spdlog.git && \
+	cd /tmp/spdlog && \
+	#echo '\n#define SPDLOG_LEVEL_NAMES {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL", "OFF  "}\n' >> include/spdlog/tweakme.h && \
+	mkdir -p /tmp/spdlog/build && \
+	cd /tmp/spdlog/build && \
+	#cmake -DSPDLOG_FMT_EXTERNAL=ON -DSPDLOG_BUILD_SHARED=ON -DCMAKE_PREFIX_PATH=/usr/local -DCMAKE_BUILD_TYPE=Release ..  && \
+	cmake -DSPDLOG_BUILD_SHARED=ON -DCMAKE_PREFIX_PATH=/usr/local -DCMAKE_BUILD_TYPE=Release ..  && \
+	cmake --build . --target install -j${CPU_CORE_NUM} && \
+	cd /tmp && rm -rf /tmp/spdlog
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# rapidjson
+#   https://github.com/Tencent/rapidjson
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS rapidjson-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch v1.1.0 https://github.com/Tencent/rapidjson.git && \
+    cd /tmp/rapidjson && \
+    mkdir build && cd build && \
+    cmake -DRAPIDJSON_BUILD_DOC=OFF \
+          -DRAPIDJSON_BUILD_EXAMPLES=OFF \
+          -DRAPIDJSON_BUILD_TESTS=OFF \
+          -DRAPIDJSON_BUILD_CXX11=OFF \
+          .. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+	cd /tmp && rm -rf /tmp/rapidjson
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install Protocol Buffers
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS protobuf-build
+WORKDIR /tmp
+RUN git clone --recursive --branch v28.2 https://github.com/protocolbuffers/protobuf.git && \
+    cd /tmp/protobuf && \
+    mkdir build && cd build && \
+    cmake -Dprotobuf_BUILD_TESTS=OFF .. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/protobuf
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install dependencies and build uWebSockets
+#   https://github.com/uNetworking/uWebSockets
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS uwebsockets-build
+WORKDIR /tmp
+RUN git clone --recursive --branch v20.67.0 https://github.com/uNetworking/uWebSockets.git && \
+    cd /tmp/uWebSockets && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/uWebSockets
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install gRPC
+#   https://github.com/grpc/grpc
+# ------------------------------------------------------------------------------------------------------------------
+FROM protobuf-build AS grpc-build
+WORKDIR /tmp
+
+# Copy Protobuf headers and libraries from protobuf-build
+#COPY --from=protobuf-build /usr/local/include/google /usr/local/include/google
+#COPY --from=protobuf-build /usr/local/lib /usr/local/lib
+#COPY --from=protobuf-build /usr/local/bin /usr/local/bin
+
+# Clone and build gRPC
+RUN git clone --recursive --branch v1.67.0 https://github.com/grpc/grpc.git && \
+    cd /tmp/grpc && \
+    mkdir cmake/build && cd cmake/build && \
+    cmake -DgRPC_INSTALL=ON \
+          -DgRPC_BUILD_TESTS=OFF \
+          -DgRPC_ABSL_PROVIDER=module \
+          -DgRPC_CARES_PROVIDER=package \
+          -DgRPC_PROTOBUF_PROVIDER=package \
+          -DgRPC_RE2_PROVIDER=package \
+          -DgRPC_SSL_PROVIDER=package \
+          -DgRPC_ZLIB_PROVIDER=package \
+          -DCMAKE_BUILD_TYPE=Release \
+          ../.. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/grpc
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install libdatachannel
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS libdatachannel-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch v0.21.2 https://github.com/paullouisageneau/libdatachannel.git && \
+	cd /tmp/libdatachannel && \
+	mkdir -p /tmp/libdatachannel/build && cd /tmp/libdatachannel/build && \
+	cmake -DUSE_MBEDTLS=OFF -DUSE_GNUTLS=OFF -DUSE_NICE=OFF -DUSE_SYSTEM_SRTP=OFF -DNO_MEDIA=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_BUILD_TYPE=Release .. && \
+	make -j${CPU_CORE_NUM} && \
+	cp -d /tmp/libdatachannel/build/libdatachannel.so* /usr/local/lib && \
+	cp -r /tmp/libdatachannel/include/rtc /usr/local/include && \
+	cp -r /tmp/libdatachannel/deps/plog/include/plog /usr/local/include && \
+    ldconfig && \
+	cd /tmp && rm -rf /tmp/libdatachannel
+
+
+# -------------------------------------------------------------------------------------------------------------
+# sqlcipher
+#   https://github.com/sqlcipher/sqlcipher
+#	https://www.sqlite.org/limits.html#max_attached (SQLITE_MAX_ATTACHED)
+#	SQLite 3.46.1 (SQLCipher 4.6.1 community)
+# -------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS sqlcipher-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recurse-submodules --branch v4.6.1 https://github.com/sqlcipher/sqlcipher.git && \
+	cd /tmp/sqlcipher && \
+	./configure --prefix=/usr/local --enable-tempstore=yes \
+		CFLAGS="-DSQLITE_HAS_CODEC -DSQLITE_MAX_ATTACHED=125" \
+		LDFLAGS="-lcrypto" && \
+	make -j${CPU_CORE_NUM} && \
+	make install && \
+    ldconfig && \
+	cd /tmp && rm -rf /tmp/sqlcipher
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# pqxx (library)
+#   https://github.com/jtv/libpqxx
+#	https://github.com/jtv/libpqxx/blob/7.9.2/BUILDING-configure.md
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS pqxx-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch 7.9.2 https://github.com/jtv/libpqxx.git && \
+	cd /tmp/libpqxx && \
+	./configure --prefix=/usr/local --enable-shared --disable-static --disable-documentation CXXFLAGS=-O3 && \
+	make -j${CPU_CORE_NUM} && \
+	make install && \
+    ldconfig && \
+	cd /tmp && rm -rf /tmp/libpqxx
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install MongoDB C++ Driver (CXX Driver)
+#   https://github.com/mongodb/mongo-cxx-driver/tree/r3.11.0
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS mongocxx-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --branch 1.28.1 https://github.com/mongodb/mongo-c-driver.git && \
+    cd /tmp/mongo-c-driver && \
+    mkdir tmp_build && cd tmp_build && \
+    cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/mongo-c-driver
+
+# Build and Install MongoDB C++ Driver
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r3.11.0 https://github.com/mongodb/mongo-cxx-driver.git && \
+    cd /tmp/mongo-cxx-driver && \
+    mkdir tmp_build && cd tmp_build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/mongo-cxx-driver
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install Redis C++ Driver (redis-cpp)
+#   https://github.com/tdv/redis-cpp
+# ------------------------------------------------------------------------------------------------------------------
+FROM boost-build AS redis-build
+WORKDIR /tmp
+RUN git clone https://github.com/tdv/redis-cpp.git && \
+    cd /tmp/redis-cpp && \
+    mkdir build && cd build && \
+    cmake -DBoost_INCLUDE_DIR=/usr/local/include/boost -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j${CPU_CORE_NUM} && \
+    make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/redis-cpp
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# AMQP-CPP (library)
+#   https://github.com/CopernicaMarketingSoftware/AMQP-CPP
+#   https://github.com/CopernicaMarketingSoftware/AMQP-CPP/tree/v4.3.26
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS amqp-cpp-build
+WORKDIR /tmp
+RUN git clone --recursive --branch v4.3.26 https://github.com/CopernicaMarketingSoftware/AMQP-CPP.git && \
+    cd /tmp/AMQP-CPP && \
+    mkdir build && cd build && \
+    cmake -DAMQP-CPP_BUILD_SHARED=ON -DAMQP-CPP_LINUX_TCP=ON .. && \
+	make -j${CPU_CORE_NUM} && \
+	make install && \
+    ldconfig && \
+    cd /tmp && rm -rf /tmp/AMQP-CPP
+
+
+# -------------------------------------------------------------------------------------------------------------
+# aws-sdk-cpp
+#   https://github.com/aws/aws-sdk-cpp
+#	https://docs.aws.amazon.com/sdk-for-cpp/v1/developer-guide/setup-linux.html
+# -------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS aws-sdk-cpp-build
+WORKDIR /tmp
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch 1.11.423 https://github.com/aws/aws-sdk-cpp && \
+	cd /tmp/aws-sdk-cpp && \
+	mkdir build && cd build && \
+	cmake -DCMAKE_BUILD_TYPE=Release \
+		  -DCMAKE_PREFIX_PATH=/usr/local \
+		  -DCMAKE_INSTALL_PREFIX=/usr/local \
+		  -DBUILD_ONLY="s3;lambda;sns;sqs" \
+		  -DENABLE_TESTING=OFF \
+		  -DMINIMIZE_SIZE=ON \
+		  .. && \
+	make -j${CPU_CORE_NUM} && \
+	make install && \
+    ldconfig && \
+	cd /tmp && rm -rf /tmp/aws-sdk-cpp
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# triton-client
+#   https://github.com/triton-inference-server/client
+#   https://github.com/triton-inference-server/client/tree/r24.10
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS triton-client-build
+WORKDIR /tmp
+
+# Copy RapidJSON from the rapidjson-build stage
+COPY --from=rapidjson-build /usr/local/include/rapidjson /usr/local/include/rapidjson
+COPY --from=rapidjson-build /usr/local/lib /usr/local/lib
+
+# Copy Protobuf from the protobuf-build stage
+COPY --from=protobuf-build /usr/local/include/google /usr/local/include/google
+COPY --from=protobuf-build /usr/local/lib /usr/local/lib
+
+RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r24.10 https://github.com/triton-inference-server/client.git && \
+	cd /tmp/client && \
+	mkdir build && cd build && \
+    cmake -DTRITON_ENABLE_CC_HTTP=ON \
+          -DTRITON_ENABLE_CC_GRPC=ON \
+          -DTRITON_ENABLE_GPU=OFF \
+          -DTRITON_ENABLE_TESTS=OFF \
+          -DTRITON_COMMON_REPO_TAG=r24.10 \
+          -DTRITON_THIRD_PARTY_REPO_TAG=r24.10 \
+          -DTRITON_CORE_REPO_TAG=r24.10 \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX:PATH=/usr/local \
+          .. && \
+    make cc-clients -j${CPU_CORE_NUM} && \
+    cd /tmp && rm -rf /tmp/client
+
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# final build: Gather all necessary dependencies and libraries
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS gcc12-final-build
+
+# Install useful tools for programming and debugging
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iputils-ping \
+    nmap \
+    net-tools \
+    lsof \
+    htop \
+    strace \
+    gdb \
+    valgrind \
+    vim \
+    nano \
+    zip \
+    unzip \
+    tar \
+    tree \
+    rsync \
+    dstat \
+    iftop \
+    ncdu \
+    sysstat \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy Boost from boost-build
+# docker run -it boost-build-image find /usr/local -name *boost*
+COPY --from=boost-build /usr/local/lib /usr/local/lib
+COPY --from=boost-build /usr/local/include /usr/local/include
+
+# Copy spdlog from spdlog-build (include fmt-build)
+# docker run -it spdlog-build-image find /usr/local -name *fmt*
+# docker run -it spdlog-build-image find /usr/local -name *spdlog*
+COPY --from=spdlog-build /usr/local/lib /usr/local/lib
+COPY --from=spdlog-build /usr/local/include /usr/local/include
+
+# Copy rapidjson from rapidjson-build
+COPY --from=rapidjson-build /usr/local/lib/cmake /usr/local/lib/cmake
+COPY --from=rapidjson-build /usr/local/include /usr/local/include
+
+# Copy uWebSockets from uwebsockets-build
+COPY --from=uwebsockets-build /usr/local/include /usr/local/include
+
+# Copy gRPC from grpc-build (include protobuf-build)
+COPY --from=grpc-build /usr/local/lib /usr/local/lib
+COPY --from=grpc-build /usr/local/include /usr/local/include
+COPY --from=grpc-build /usr/local/bin /usr/local/bin
+
+# Copy libdatachannel from libdatachannel-build
+COPY --from=libdatachannel-build /usr/local/lib /usr/local/lib
+COPY --from=libdatachannel-build /usr/local/include /usr/local/include
+
+# Copy SQLCipher from sqlcipher-build
+COPY --from=sqlcipher-build /usr/local/lib /usr/local/lib
+COPY --from=sqlcipher-build /usr/local/include /usr/local/include
+COPY --from=sqlcipher-build /usr/local/bin /usr/local/bin
+
+## Copy pqxx from pqxx-build
+COPY --from=pqxx-build /usr/local/lib /usr/local/lib
+COPY --from=pqxx-build /usr/local/include /usr/local/include
+
+# Copy MongoDB C++ driver from mongocxx-build
+COPY --from=mongocxx-build /usr/local/lib /usr/local/lib
+COPY --from=mongocxx-build /usr/local/include /usr/local/include
+COPY --from=mongocxx-build /usr/local/bin /usr/local/bin
+
+## Copy Redis C++ driver from redis-build
+## docker run -it redis-build-image find /usr/local -name *redis*
+COPY --from=redis-build /usr/local/lib/cmake/redis-cpp /usr/local/lib/cmake/redis-cpp
+COPY --from=redis-build /usr/local/lib/libredis-cpp.a /usr/local/lib/libredis-cpp.a
+COPY --from=redis-build /usr/local/include/redis-cpp /usr/local/include/redis-cpp
+COPY --from=redis-build /usr/local/include/boost/redis.hpp /usr/local/include/boost/redis.hpp
+
+# Copy AMQP-CPP from amqp-cpp-build
+COPY --from=amqp-cpp-build /usr/local/lib /usr/local/lib
+COPY --from=amqp-cpp-build /usr/local/include /usr/local/include
+
+# Copy AWS SDK from aws-sdk-cpp-build
+COPY --from=aws-sdk-cpp-build /usr/local/lib /usr/local/lib
+COPY --from=aws-sdk-cpp-build /usr/local/include /usr/local/include
+
+# Copy Triton client libraries from triton-client-build
+COPY --from=triton-client-build /usr/local/lib /usr/local/lib
+COPY --from=triton-client-build /usr/local/include /usr/local/include
+COPY --from=triton-client-build /usr/local/bin /usr/local/bin
+
+# Set working directory for the final app
+WORKDIR /home/cpp_lab
+
+# Define entry point (optional)
+CMD ["/bin/bash"]
+
+# Specify the maintainer’s email
+LABEL maintainer1="kaishainmooi@gmail.com"
+
