@@ -1,0 +1,51 @@
+
+# CLI of docker:
+#   docker info
+#   docker images
+#   docker network ls
+#   docker volume ls
+#   docker image prune
+#
+#   docker ps -a
+#   docker logs -f <container_id_or_name>
+#   docker exec -it gcc12-final /bin/bash
+
+# Attach to the container:
+#   docker exec -it postgres bash
+#   docker exec -it mysql bash
+
+# CLI of docker compose:
+#   docker compose -f docker/compose.yml build
+#   docker compose -f docker/compose.yml up
+#   docker compose -f docker/compose.yml up -d
+#   docker compose -f docker/compose.yml up gcc12-final
+#   docker compose -f docker/compose.yml down
+#   docker compose -f docker/compose.yml down gcc12-final
+#   docker compose -f docker/compose.yml down -v      # Remove volumes
+#
+#   docker compose -f docker/compose.yml run gcc12-final /bin/bash
+# 
+#   docker compose top
+#   docker compose ps -a
+#   docker compose stats
+#   docker compose logs -f
+#   docker rm $(docker ps -a -q)
+#   docker image prune -f
+
+services:
+  gcc12-final:
+    image: gcc12-final-image
+    container_name: gcc12-final-container
+    hostname: gcc12-docker
+    build:
+      context: .
+      dockerfile: gcc12.docker
+      target: gcc12-final-build
+    volumes:
+      - ../:/home/cpp_lab
+      #- data-volume:/data           
+    environment:
+      - ENV_VAR1=value1
+      - ENV_VAR2=value2
+      - ENV_VAR3=value3
+
