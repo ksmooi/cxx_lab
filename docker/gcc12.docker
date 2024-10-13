@@ -1,5 +1,5 @@
-# docker build -f docker/gcc12.docker --target boost-build -t boost-build-image .
-# docker build -f docker/gcc12.docker -t gcc12-env .
+# docker build -f docker/gcc12.docker --target gcc12-init-build -t gcc12-init-image .
+# docker build -f docker/gcc12.docker --target boost-build -t boost-image .
 # docker run -it gcc12-env /bin/bash
 #
 # docker rm $(docker ps -a -q)
@@ -65,6 +65,19 @@ RUN git clone --recursive --branch boost-1.86.0 https://github.com/boostorg/beas
     cd /tmp/beast && \
     cp -r include/boost/beast /usr/local/include/boost/ && \
     cd /tmp && rm -rf /tmp/beast
+
+# Build sigslot
+RUN git clone --recursive --branch v1.2.2 https://github.com/palacaze/sigslot.git && \
+    cd /tmp/sigslot && \
+    mkdir build && cd build && \
+    cmake -DSIGSLOT_REDUCE_COMPILE_TIME=ON \
+          -DSIGSLOT_COMPILE_EXAMPLES=OFF \
+          -DSIGSLOT_COMPILE_TESTS=OFF \
+          -DCMAKE_INSTALL_PREFIX=/usr/local \
+          .. && \
+    cmake --build . && \
+    cmake --install . && \
+    cd /tmp && rm -rf /tmp/sigslot
 
 
 # -------------------------------------------------------------------------------------------------------------
