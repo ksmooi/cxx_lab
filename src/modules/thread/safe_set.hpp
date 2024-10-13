@@ -2,7 +2,7 @@
 #define CXX_LAB_SAFE_SET_HPP
 
 #include <set>
-#include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <chrono>
 #include <functional>
@@ -41,7 +41,7 @@ public:
      * @return true if the insertion was successful, false otherwise (e.g., key already exists in std::set).
      */
     bool try_insert(const value_type& value) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock()) {
             return false; // Unable to acquire lock immediately
         }
@@ -62,7 +62,7 @@ public:
      */
     template <typename... Args>
     bool try_emplace(Args&&... args) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock()) {
             return false; // Unable to acquire lock immediately
         }
@@ -82,7 +82,7 @@ public:
      * @return true if the insertion was successful within the timeout, false otherwise.
      */
     bool insert(const value_type& value, const std::chrono::milliseconds& timeout) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock_for(timeout)) {
             return false; // Timeout occurred
         }
@@ -101,7 +101,7 @@ public:
      * @return true if the insertion was successful, false otherwise (e.g., key already exists in std::set).
      */
     bool insert(const value_type& value) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto result = container_.insert(value);
         if (result.second) { // Insertion succeeded
             not_empty_.notify_one();
@@ -119,30 +119,93 @@ public:
      */
     template <typename... Args>
     bool emplace(Args&&... args) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
-        container_.emplace(std::forward<Args>(args)...);
-        not_empty_.notify_one();
-        return true; // Emplacement always attempted; success is determined by the set
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        auto result = container_.emplace(std::forward<Args>(args)...);
+        if (result.second) { // Emplacement succeeded
+            not_empty_.notify_one();
+            return true;
+        }
+        return false; // Emplacement failed (key already exists)
     }
 
     /**
-     * @brief Provides thread-safe access to the underlying associative container.
+     * @brief Attempts to extract an element without blocking.
      *
-     * The provided function is executed while holding the mutex lock,
-     * ensuring safe access to the container.
+     * @param value The element to extract.
+     * @return true if the extraction was successful, false otherwise (e.g., key not found).
+     */
+    bool try_extract(const value_type& value) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
+        if (!lock.try_lock()) {
+            return false; // Unable to acquire lock immediately
+        }
+        auto it = container_.find(value);
+        if (it != container_.end()) {
+            container_.erase(it);
+            return true;
+        }
+        return false; // Element not found
+    }
+
+    /**
+     * @brief Extracts an element, blocking until the element is available or timeout occurs.
+     *
+     * @param value The element to extract.
+     * @param timeout The maximum duration to wait for the element.
+     * @return true if the extraction was successful within the timeout, false otherwise.
+     */
+    bool extract(const value_type& value, const std::chrono::milliseconds& timeout) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (container_.find(value) == container_.end()) {
+            if (not_empty_.wait_until(lock, deadline) == std::cv_status::timeout) {
+                return false; // Timeout occurred
+            }
+        }
+        auto it = container_.find(value);
+        if (it != container_.end()) {
+            container_.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @brief Extracts an element, blocking until the element is available.
+     *
+     * @param value The element to extract.
+     * @return true if the extraction was successful, false otherwise.
+     */
+    bool extract(const value_type& value) {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        not_empty_.wait(lock, [this, &value]() { return container_.find(value) != container_.end(); });
+        auto it = container_.find(value);
+        if (it != container_.end()) {
+            container_.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @brief Provides thread-safe write access to the underlying associative container.
+     *
+     * The provided function is executed while holding an exclusive mutex lock,
+     * ensuring safe modification of the container.
      *
      * @param func A function that takes a reference to the associative container.
      */
     void access(const std::function<void(Container&)>& func) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         func(container_);
+        not_empty_.notify_all(); // Notify all waiting threads, if necessary
     }
 
     /**
      * @brief Clears all elements from the container.
      */
     void clear() {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         container_.clear();
     }
 
@@ -153,7 +216,7 @@ public:
      * @return The number of elements erased (0 or 1 for std::set).
      */
     size_type erase(const value_type& value) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         size_type erased = container_.erase(value);
         return erased;
     }
@@ -165,7 +228,7 @@ public:
      * @return The number of elements with the specified key (0 or 1 for std::set).
      */
     size_type count(const key_type& key) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.count(key);
     }
 
@@ -176,7 +239,7 @@ public:
      * @return true if the container contains the key, false otherwise.
      */
     bool contains(const key_type& key) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.find(key) != container_.end();
     }
 
@@ -186,7 +249,7 @@ public:
      * @return true if empty, false otherwise.
      */
     bool empty() const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.empty();
     }
 
@@ -196,14 +259,14 @@ public:
      * @return The number of elements.
      */
     size_type size() const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.size();
     }
 
 private:
-    mutable std::timed_mutex mutex_;                    ///< Mutex to protect container access
-    mutable std::condition_variable_any not_empty_; ///< Condition variable to signal element availability
-    Container container_;                           ///< Underlying associative container
+    mutable std::shared_timed_mutex mutex_;               ///< Shared mutex to protect container access
+    mutable std::condition_variable_any not_empty_;       ///< Condition variable to signal element availability
+    Container container_;                                  ///< Underlying associative container
 };
 
 } // namespace cxx_lab
