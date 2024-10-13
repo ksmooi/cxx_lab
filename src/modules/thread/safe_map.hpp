@@ -2,7 +2,7 @@
 #define CXX_LAB_SAFE_MAP_CONTAINER_HPP
 
 #include <map>
-#include <mutex>
+#include <shared_mutex>
 #include <condition_variable>
 #include <chrono>
 #include <functional>
@@ -34,7 +34,7 @@ public:
     using iterator = typename Container::iterator;
 
     /**
-     * @brief Constructs a SafeKeyValueContainer.
+     * @brief Constructs a SafeMap.
      */
     SafeMap() : mutex_(), not_empty_(), container_() {}
 
@@ -45,7 +45,7 @@ public:
      * @return true if the insertion was successful, false otherwise (e.g., key already exists in std::map).
      */
     bool try_insert(const value_type& value) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock()) {
             return false;
         }
@@ -54,7 +54,7 @@ public:
             not_empty_.notify_one();
             return true;
         }
-        return false; // For std::map, insertion fails if key exists
+        return false; // Insertion failed (key exists)
     }
 
     /**
@@ -66,18 +66,16 @@ public:
      */
     template <typename... Args>
     bool try_emplace(Args&&... args) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock()) {
             return false;
         }
-        // Since there's no capacity limit, insertions can always proceed
-        // However, for std::map, insertion can fail if key exists
         auto result = container_.emplace(std::forward<Args>(args)...);
         if (result.second) {
             not_empty_.notify_one();
             return true;
         }
-        return false; // For std::map, emplace fails if key exists
+        return false; // Emplace failed (key exists)
     }
 
     /**
@@ -88,18 +86,16 @@ public:
      * @return true if the insertion was successful within the timeout, false otherwise.
      */
     bool insert(const value_type& value, const std::chrono::milliseconds& timeout) {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock_for(timeout)) {
             return false; // Timeout occurred
         }
-        // Since there's no capacity limit, insertions can always proceed
-        // However, for std::map, insertion can fail if key exists
         auto result = container_.insert(value);
         if (result.second) {
             not_empty_.notify_one();
             return true;
         }
-        return false; // For std::map, insertion fails if key exists
+        return false; // Insertion failed (key exists)
     }
 
     /**
@@ -109,15 +105,13 @@ public:
      * @return true if the insertion was successful, false otherwise.
      */
     bool insert(const value_type& value) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
-        // Since there's no capacity limit, insertions can always proceed
-        // However, for std::map, insertion can fail if key exists
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto result = container_.insert(value);
         if (result.second) {
             not_empty_.notify_one();
             return true;
         }
-        return false; // For std::map, insertion fails if key exists
+        return false; // Insertion failed (key exists)
     }
 
     /**
@@ -125,19 +119,17 @@ public:
      *
      * @tparam Args The types of the arguments to construct the element.
      * @param args The arguments to pass to the element's constructor.
-     * @return true if the insertion was successful, false otherwise.
+     * @return true if the emplacement was successful, false otherwise.
      */
     template <typename... Args>
     bool emplace(Args&&... args) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
-        // Since there's no capacity limit, insertions can always proceed
-        // However, for std::map, insertion can fail if key exists
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         auto result = container_.emplace(std::forward<Args>(args)...);
         if (result.second) {
             not_empty_.notify_one();
             return true;
         }
-        return false; // For std::map, insertion fails if key exists
+        return false; // Emplace failed (key exists)
     }
 
     /**
@@ -148,7 +140,7 @@ public:
      * @return true if the element was found, false otherwise.
      */
     bool try_at(const key_type& key, mapped_type& value) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_, std::defer_lock);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_, std::defer_lock);
         if (!lock.try_lock()) {
             return false;
         }
@@ -169,11 +161,11 @@ public:
      * @return true if the element was found within the timeout, false otherwise.
      */
     bool at(const key_type& key, mapped_type& value, const std::chrono::milliseconds& timeout) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         auto deadline = std::chrono::steady_clock::now() + timeout;
         while (container_.find(key) == container_.end()) {
             if (not_empty_.wait_until(lock, deadline) == std::cv_status::timeout) {
-                return false; // Timeout
+                return false; // Timeout expired
             }
         }
         auto it = container_.find(key);
@@ -188,10 +180,11 @@ public:
      * @brief Accesses an element by key, blocking until the element is available.
      *
      * @param key The key of the element to access.
-     * @param value Reference to store the accessed value.
+     * @return const mapped_type& Reference to the accessed value.
+     * @throws std::out_of_range if the key is not found.
      */
     const mapped_type& at(const key_type& key) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         not_empty_.wait(lock, [this, &key]() { return container_.find(key) != container_.end(); });
         auto it = container_.find(key);
         if (it != container_.end()) {
@@ -201,24 +194,28 @@ public:
     }
 
     /**
-     * @brief Provides thread-safe access to the underlying associative container.
+     * @brief Provides thread-safe read or write access to the underlying associative container.
      *
-     * The provided function is executed while holding the mutex lock,
+     * The provided function is executed while holding the appropriate mutex lock,
      * ensuring safe access to the container.
      *
      * @param func A function that takes a reference to the associative container.
+     *             For read operations, use a lambda that only reads data.
+     *             For write operations, use a lambda that modifies data.
      */
     void access(const std::function<void(Container&)>& func) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         func(container_);
+        not_empty_.notify_all(); // Notify all waiting threads, if necessary
     }
 
     /**
      * @brief Clears all elements from the container.
      */
     void clear() {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         container_.clear();
+        not_empty_.notify_all(); // Notify all waiting threads
     }
 
     /**
@@ -228,7 +225,7 @@ public:
      * @return The number of elements erased.
      */
     size_type erase(const key_type& key) {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         size_type erased = container_.erase(key);
         return erased;
     }
@@ -240,7 +237,7 @@ public:
      * @return The number of elements with the specified key.
      */
     size_type count(const key_type& key) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.count(key);
     }
 
@@ -251,7 +248,7 @@ public:
      * @return true if the container contains the key, false otherwise.
      */
     bool contains(const key_type& key) const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.find(key) != container_.end();
     }
 
@@ -261,7 +258,7 @@ public:
      * @return true if empty, false otherwise.
      */
     bool empty() const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.empty();
     }
 
@@ -271,14 +268,14 @@ public:
      * @return The number of elements.
      */
     size_type size() const {
-        std::unique_lock<std::timed_mutex> lock(mutex_);
+        std::shared_lock<std::shared_timed_mutex> lock(mutex_);
         return container_.size();
     }
 
 private:
-    mutable std::timed_mutex mutex_;                    ///< Mutex to protect container access
-    mutable std::condition_variable_any not_empty_;     ///< Condition variable to signal element availability
-    Container container_;                               ///< Underlying associative container
+    mutable std::shared_timed_mutex mutex_;               ///< Shared mutex to protect container access
+    mutable std::condition_variable_any not_empty_;       ///< Condition variable to signal element availability
+    Container container_;                                 ///< Underlying associative container
 };
 
 } // namespace cxx_lab
