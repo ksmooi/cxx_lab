@@ -60,12 +60,6 @@ RUN wget https://boostorg.jfrog.io/artifactory/main/release/1.86.0/source/boost_
     ./b2 install && \
     cd /tmp && rm -rf /tmp/boost_1_86_0.tar.gz /tmp/boost_1_86_0
 
-# Copy Boost.Beast to /usr/local/include/boost
-RUN git clone --recursive --branch boost-1.86.0 https://github.com/boostorg/beast.git && \
-    cd /tmp/beast && \
-    cp -r include/boost/beast /usr/local/include/boost/ && \
-    cd /tmp && rm -rf /tmp/beast
-
 # Build sigslot
 RUN git clone --recursive --branch v1.2.2 https://github.com/palacaze/sigslot.git && \
     cd /tmp/sigslot && \
