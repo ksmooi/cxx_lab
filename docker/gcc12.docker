@@ -1,6 +1,6 @@
 # docker build -f docker/gcc12.docker --target gcc12-init-build -t gcc12-init-image .
 # docker build -f docker/gcc12.docker --target boost-build -t boost-image .
-# docker run -it gcc12-env /bin/bash
+# docker run -it gcc12-init-image /bin/bash
 #
 # docker rm $(docker ps -a -q)
 # docker image prune -f
@@ -36,11 +36,10 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 12 && \
 
 # Install CMake
 RUN apt-get autoremove -y && \
-	mkdir /opt/cmake && \
 	cd /tmp && \
 	wget https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-linux-x86_64.sh && \
-	sh ./cmake-3.30.5-linux-x86_64.sh --prefix=/opt/cmake --skip-license && \
-	ln -f -s /opt/cmake/bin/cmake /usr/bin/cmake && \
+    sh ./cmake-3.30.5-linux-x86_64.sh --prefix=/usr/local --skip-license && \
+	ln -f -s /usr/local/bin/cmake /usr/bin/cmake && \
 	rm -rf /tmp/cmake-3.30.5-linux-x86_64.sh
 
 
@@ -130,21 +129,56 @@ RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch v1.1.0 https://git
 # ------------------------------------------------------------------------------------------------------------------
 # Install Protocol Buffers
 # ------------------------------------------------------------------------------------------------------------------
-FROM gcc12-init-build AS protobuf-build
+#FROM gcc12-init-build AS protobuf-build
+#WORKDIR /tmp
+#RUN git clone --recursive --branch v28.2 https://github.com/protocolbuffers/protobuf.git && \
+#    cd /tmp/protobuf && \
+#    mkdir build && cd build && \
+#    cmake -DCMAKE_BUILD_TYPE=Release \
+#          -DBUILD_SHARED_LIBS=ON \
+#          -DCMAKE_INSTALL_PREFIX=/usr/local \
+#          -Dprotobuf_BUILD_TESTS=OFF \
+#          .. && \
+#    make -j${CPU_CORE_NUM} && \
+#    make install && \
+#    ldconfig && \
+#    cd /tmp && rm -rf /tmp/protobuf
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# Install gRPC
+#   https://github.com/grpc/grpc
+#   https://github.com/grpc/grpc/blob/master/BUILDING.md
+#   we should build gRPC and protobuf at the same time (there are some dependencies)
+# ------------------------------------------------------------------------------------------------------------------
+FROM gcc12-init-build AS grpc-build
 WORKDIR /tmp
-RUN git clone --recursive --branch v28.2 https://github.com/protocolbuffers/protobuf.git && \
-    cd /tmp/protobuf && \
-    mkdir build && cd build && \
-    cmake -Dprotobuf_BUILD_TESTS=OFF .. && \
+
+# Clone and build gRPC
+RUN git clone --recursive --branch v1.67.0 https://github.com/grpc/grpc.git && \
+    cd /tmp/grpc && \
+    mkdir cmake/build && cd cmake/build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=ON \
+          -DgRPC_PROTOBUF_PROVIDER=module \
+          -DgRPC_ABSL_PROVIDER=module \
+          -DgRPC_CARES_PROVIDER=module \
+          -DgRPC_RE2_PROVIDER=module \
+          -DgRPC_SSL_PROVIDER=module \
+          -DgRPC_ZLIB_PROVIDER=module \
+          -DgRPC_BUILD_TESTS=OFF \
+          -DgRPC_INSTALL=ON \
+          ../.. && \
     make -j${CPU_CORE_NUM} && \
     make install && \
     ldconfig && \
-    cd /tmp && rm -rf /tmp/protobuf
+    cd /tmp && rm -rf /tmp/grpc
 
 
 # ------------------------------------------------------------------------------------------------------------------
 # Install dependencies and build uWebSockets
 #   https://github.com/uNetworking/uWebSockets
+#   https://github.com/uNetworking/uWebSockets/issues/1600 (install uSockets)
 # ------------------------------------------------------------------------------------------------------------------
 FROM gcc12-init-build AS uwebsockets-build
 WORKDIR /tmp
@@ -152,40 +186,9 @@ RUN git clone --recursive --branch v20.67.0 https://github.com/uNetworking/uWebS
     cd /tmp/uWebSockets && \
     make -j${CPU_CORE_NUM} && \
     make install && \
-    ldconfig && \
+    cp uSockets/src/libusockets.h /usr/local/include/ && \
+    cp uSockets/uSockets.a /usr/local/lib/ && \
     cd /tmp && rm -rf /tmp/uWebSockets
-
-
-# ------------------------------------------------------------------------------------------------------------------
-# Install gRPC
-#   https://github.com/grpc/grpc
-# ------------------------------------------------------------------------------------------------------------------
-FROM protobuf-build AS grpc-build
-WORKDIR /tmp
-
-# Copy Protobuf headers and libraries from protobuf-build
-#COPY --from=protobuf-build /usr/local/include/google /usr/local/include/google
-#COPY --from=protobuf-build /usr/local/lib /usr/local/lib
-#COPY --from=protobuf-build /usr/local/bin /usr/local/bin
-
-# Clone and build gRPC
-RUN git clone --recursive --branch v1.67.0 https://github.com/grpc/grpc.git && \
-    cd /tmp/grpc && \
-    mkdir cmake/build && cd cmake/build && \
-    cmake -DgRPC_INSTALL=ON \
-          -DgRPC_BUILD_TESTS=OFF \
-          -DgRPC_ABSL_PROVIDER=module \
-          -DgRPC_CARES_PROVIDER=package \
-          -DgRPC_PROTOBUF_PROVIDER=package \
-          -DgRPC_RE2_PROVIDER=package \
-          -DgRPC_SSL_PROVIDER=package \
-          -DgRPC_ZLIB_PROVIDER=package \
-          -DCMAKE_BUILD_TYPE=Release \
-          ../.. && \
-    make -j${CPU_CORE_NUM} && \
-    make install && \
-    ldconfig && \
-    cd /tmp && rm -rf /tmp/grpc
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -242,28 +245,22 @@ RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch 7.9.2 https://gith
 
 # ------------------------------------------------------------------------------------------------------------------
 # Install MongoDB C++ Driver (CXX Driver)
-#   https://github.com/mongodb/mongo-cxx-driver/tree/r3.11.0
+#   https://www.mongodb.com/docs/languages/cpp/cpp-driver/current/
 # ------------------------------------------------------------------------------------------------------------------
 FROM gcc12-init-build AS mongocxx-build
 WORKDIR /tmp
-RUN env GIT_SSL_NO_VERIFY=true git clone --branch 1.28.1 https://github.com/mongodb/mongo-c-driver.git && \
-    cd /tmp/mongo-c-driver && \
-    mkdir tmp_build && cd tmp_build && \
-    cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j${CPU_CORE_NUM} && \
-    make install && \
+ENV MONGOCXX_VERSION=r3.11.0
+RUN curl -OL https://github.com/mongodb/mongo-cxx-driver/releases/download/${MONGOCXX_VERSION}/mongo-cxx-driver-${MONGOCXX_VERSION}.tar.gz && \
+    tar -xzf mongo-cxx-driver-${MONGOCXX_VERSION}.tar.gz && \
+    cd mongo-cxx-driver-${MONGOCXX_VERSION}/build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DMONGOCXX_OVERRIDE_DEFAULT_INSTALL_PREFIX=OFF \
+          .. && \
+    cmake --build . -j${CPU_CORE_NUM} && \
+    cmake --build . --target install && \
     ldconfig && \
-    cd /tmp && rm -rf /tmp/mongo-c-driver
-
-# Build and Install MongoDB C++ Driver
-RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r3.11.0 https://github.com/mongodb/mongo-cxx-driver.git && \
-    cd /tmp/mongo-cxx-driver && \
-    mkdir tmp_build && cd tmp_build && \
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
-    make -j${CPU_CORE_NUM} && \
-    make install && \
-    ldconfig && \
-    cd /tmp && rm -rf /tmp/mongo-cxx-driver
+    rm -f /tmp/mongo-cxx-driver-${MONGOCXX_VERSION}.tar.gz && \
+    rm -rf /tmp/mongo-cxx-driver-${MONGOCXX_VERSION}
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -275,7 +272,7 @@ WORKDIR /tmp
 RUN git clone https://github.com/tdv/redis-cpp.git && \
     cd /tmp/redis-cpp && \
     mkdir build && cd build && \
-    cmake -DBoost_INCLUDE_DIR=/usr/local/include/boost -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
     make -j${CPU_CORE_NUM} && \
     make install && \
     ldconfig && \
@@ -334,9 +331,9 @@ WORKDIR /tmp
 COPY --from=rapidjson-build /usr/local/include/rapidjson /usr/local/include/rapidjson
 COPY --from=rapidjson-build /usr/local/lib /usr/local/lib
 
-# Copy Protobuf from the protobuf-build stage
-COPY --from=protobuf-build /usr/local/include/google /usr/local/include/google
-COPY --from=protobuf-build /usr/local/lib /usr/local/lib
+# Copy Protobuf from the grpc-build stage
+COPY --from=grpc-build /usr/local/include /usr/local/include
+COPY --from=grpc-build /usr/local/lib /usr/local/lib
 
 RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r24.10 https://github.com/triton-inference-server/client.git && \
 	cd /tmp/client && \
@@ -400,6 +397,7 @@ COPY --from=rapidjson-build /usr/local/lib/cmake /usr/local/lib/cmake
 COPY --from=rapidjson-build /usr/local/include /usr/local/include
 
 # Copy uWebSockets from uwebsockets-build
+COPY --from=uwebsockets-build /usr/local/lib /usr/local/lib
 COPY --from=uwebsockets-build /usr/local/include /usr/local/include
 
 # Copy gRPC from grpc-build (include protobuf-build)
@@ -453,4 +451,5 @@ CMD ["/bin/bash"]
 
 # Specify the maintainer’s email
 LABEL maintainer1="kaishainmooi@gmail.com"
+
 
