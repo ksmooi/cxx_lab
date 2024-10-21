@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package sum;
+
+// The SumService definition.
+service SumService {
+  // Client-side streaming RPC to compute the sum of numbers.
+  rpc ComputeSum (stream NumberRequest) returns (SumReply) {}
+}
+
+// The request message containing a single number.
+message NumberRequest {
+  int32 number = 1;
+}
+
+// The response message containing the sum of numbers.
+message SumReply {
+  int32 sum = 1;
+}

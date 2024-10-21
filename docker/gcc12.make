@@ -4,10 +4,10 @@
 # make -f docker/gcc12.make boost fmt spdlog
 # ----------------------------------------------------------------------------------
 
-.PHONY: all gcc12-init boost fmt spdlog rapidjson grpc uwebsockets libdatachannel sqlcipher pqxx mongocxx redis amqp-cpp aws-sdk-cpp triton-client gcc12-final
+.PHONY: all gcc12-init boost fmt spdlog rapidjson grpc uwebsockets libdatachannel sqlcipher pqxx mongocxx redis amqp-cpp aws-sdk-cpp gcc12-final
 
 # Default target to build everything
-all: gcc12-init boost fmt spdlog rapidjson grpc uwebsockets libdatachannel sqlcipher pqxx mongocxx redis amqp-cpp aws-sdk-cpp triton-client gcc12-final
+all: gcc12-init boost fmt spdlog rapidjson grpc uwebsockets libdatachannel sqlcipher pqxx mongocxx redis amqp-cpp aws-sdk-cpp gcc12-final
 
 # Build the gcc12-init-build target
 gcc12-init:

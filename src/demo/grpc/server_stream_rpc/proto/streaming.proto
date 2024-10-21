@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package streaming;
+
+// The NumberGenerator service definition.
+service NumberGenerator {
+  // Server-side streaming RPC to generate a sequence of numbers.
+  rpc GenerateNumbers (NumberRequest) returns (stream NumberResponse) {}
+}
+
+// The request message containing the start number and the count of numbers to generate.
+message NumberRequest {
+  int32 start = 1;
+  int32 count = 2;
+}
+
+// The response message containing a single number.
+message NumberResponse {
+  int32 number = 1;
+}
