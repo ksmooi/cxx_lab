@@ -41,11 +41,32 @@ services:
       context: .
       dockerfile: gcc12.docker
       target: gcc12-final-build
+    networks:
+      - internal
+    ports:
+      - "8080:8080"    # Expose the server's port if needed
+      - "12345:12345"  # Expose the server's port if needed
     volumes:
       - ../:/home/cpp_lab
       #- data-volume:/data           
     environment:
-      - ENV_VAR1=value1
-      - ENV_VAR2=value2
-      - ENV_VAR3=value3
+      - LD_LIBRARY_PATH=/usr/local/lib
 
+  gcc12-final-client:
+    image: gcc12-final-image
+    container_name: gcc12-final-client-container
+    hostname: gcc12-docker-client
+    build:
+      context: .
+      dockerfile: gcc12.docker
+      target: gcc12-final-build
+    networks:
+      - internal
+    volumes:
+      - ../:/home/cpp_lab         
+    environment:
+      - LD_LIBRARY_PATH=/usr/local/lib
+
+networks:
+  internal:
+    driver: bridge
