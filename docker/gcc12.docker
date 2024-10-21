@@ -324,32 +324,33 @@ RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch 1.11.423 https://g
 #   https://github.com/triton-inference-server/client
 #   https://github.com/triton-inference-server/client/tree/r24.10
 # ------------------------------------------------------------------------------------------------------------------
-FROM gcc12-init-build AS triton-client-build
-WORKDIR /tmp
-
-# Copy RapidJSON from the rapidjson-build stage
-COPY --from=rapidjson-build /usr/local/include/rapidjson /usr/local/include/rapidjson
-COPY --from=rapidjson-build /usr/local/lib /usr/local/lib
-
-# Copy Protobuf from the grpc-build stage
-COPY --from=grpc-build /usr/local/include /usr/local/include
-COPY --from=grpc-build /usr/local/lib /usr/local/lib
-
-RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r24.10 https://github.com/triton-inference-server/client.git && \
-	cd /tmp/client && \
-	mkdir build && cd build && \
-    cmake -DTRITON_ENABLE_CC_HTTP=ON \
-          -DTRITON_ENABLE_CC_GRPC=ON \
-          -DTRITON_ENABLE_GPU=OFF \
-          -DTRITON_ENABLE_TESTS=OFF \
-          -DTRITON_COMMON_REPO_TAG=r24.10 \
-          -DTRITON_THIRD_PARTY_REPO_TAG=r24.10 \
-          -DTRITON_CORE_REPO_TAG=r24.10 \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX:PATH=/usr/local \
-          .. && \
-    make cc-clients -j${CPU_CORE_NUM} && \
-    cd /tmp && rm -rf /tmp/client
+#FROM gcc12-init-build AS triton-client-build
+#WORKDIR /tmp
+#
+## Copy RapidJSON from the rapidjson-build stage
+#COPY --from=rapidjson-build /usr/local/include/rapidjson /usr/local/include/rapidjson
+#COPY --from=rapidjson-build /usr/local/lib /usr/local/lib
+#
+## Copy Protobuf from the grpc-build stage
+#COPY --from=grpc-build /usr/local/lib /usr/local/lib
+#COPY --from=grpc-build /usr/local/include /usr/local/include
+#COPY --from=grpc-build /usr/local/bin /usr/local/bin
+#
+#RUN env GIT_SSL_NO_VERIFY=true git clone --recursive --branch r24.10 https://github.com/triton-inference-server/client.git && \
+#	cd /tmp/client && \
+#	mkdir build && cd build && \
+#    cmake -DTRITON_ENABLE_CC_HTTP=ON \
+#          -DTRITON_ENABLE_CC_GRPC=ON \
+#          -DTRITON_ENABLE_GPU=OFF \
+#          -DTRITON_ENABLE_TESTS=OFF \
+#          -DTRITON_COMMON_REPO_TAG=r24.10 \
+#          -DTRITON_THIRD_PARTY_REPO_TAG=r24.10 \
+#          -DTRITON_CORE_REPO_TAG=r24.10 \
+#          -DCMAKE_BUILD_TYPE=Release \
+#          -DCMAKE_INSTALL_PREFIX:PATH=/usr/local \
+#          .. && \
+#    make cc-clients -j${CPU_CORE_NUM} && \
+#    cd /tmp && rm -rf /tmp/client
 
 
 
@@ -437,11 +438,6 @@ COPY --from=amqp-cpp-build /usr/local/include /usr/local/include
 # Copy AWS SDK from aws-sdk-cpp-build
 COPY --from=aws-sdk-cpp-build /usr/local/lib /usr/local/lib
 COPY --from=aws-sdk-cpp-build /usr/local/include /usr/local/include
-
-# Copy Triton client libraries from triton-client-build
-COPY --from=triton-client-build /usr/local/lib /usr/local/lib
-COPY --from=triton-client-build /usr/local/include /usr/local/include
-COPY --from=triton-client-build /usr/local/bin /usr/local/bin
 
 # Set working directory for the final app
 WORKDIR /home/cpp_lab
