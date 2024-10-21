@@ -44,7 +44,12 @@ services:
     networks:
       - internal
     ports:
-      - "8080:8080"    # Expose the server's port if needed
+      - "8080:8080"   
+      - "8081:8081"   
+      - "8082:8082"   
+      - "8083:8083"
+      - "8084:8084"   
+      - "8085:8085"   
       - "12345:12345"  # Expose the server's port if needed
     volumes:
       - ../:/home/cpp_lab
