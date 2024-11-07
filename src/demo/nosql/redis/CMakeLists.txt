@@ -1,0 +1,9 @@
+add_executable(demo_redis_without_ssl demo_redis_without_ssl.cpp)
+target_link_libraries(demo_redis_without_ssl PRIVATE boost_system boost_program_options ssl crypto)
+
+add_executable(demo_redis_cpp_client demo_redis_cpp_client.cpp)
+target_link_libraries(demo_redis_cpp_client PRIVATE boost_system boost_program_options fmt redis-cpp)
+
+add_executable(demo_redis_cpp_async demo_redis_cpp_async.cpp)
+target_link_libraries(demo_redis_cpp_async PRIVATE boost_system boost_program_options fmt redis-cpp)
+
