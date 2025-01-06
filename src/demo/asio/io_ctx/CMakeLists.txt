@@ -1,0 +1,8 @@
+add_executable(ioctx_notify_fork ioctx_notify_fork.cpp)
+target_link_libraries(ioctx_notify_fork PRIVATE fmt pthread)
+
+add_executable(ioctx_control_service ioctx_control_service.cpp)
+target_link_libraries(ioctx_control_service PRIVATE pthread boost_system)
+
+add_executable(ioctx_running_task ioctx_running_task.cpp)
+target_link_libraries(ioctx_running_task PRIVATE pthread boost_system boost_program_options)
