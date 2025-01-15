@@ -1,0 +1,5 @@
+add_executable(thread_pool_with_ioctx thread_pool_with_ioctx.cpp)
+target_link_libraries(thread_pool_with_ioctx PRIVATE boost_system boost_thread)
+
+add_executable(thread_group_with_ioctx thread_group_with_ioctx.cpp)
+target_link_libraries(thread_group_with_ioctx PRIVATE boost_system boost_thread)
