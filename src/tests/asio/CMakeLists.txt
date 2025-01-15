@@ -1,0 +1,2 @@
+add_executable(test_timer_manager test_timer_manager.cpp)
+target_link_libraries(test_timer_manager PRIVATE spdlog)
