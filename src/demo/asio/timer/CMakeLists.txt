@@ -1,0 +1,6 @@
+
+add_executable(timer_control timer_control.cpp)
+target_link_libraries(timer_control PRIVATE pthread boost_program_options)
+
+add_executable(demo_timer_manager demo_timer_manager.cpp)
+target_link_libraries(demo_timer_manager PRIVATE pthread boost_program_options)
