@@ -1,0 +1,3 @@
+# Define the executable for demo_spsc_queue
+add_executable(demo_lockfree_queue demo_lockfree_queue.cpp)
+add_executable(demo_lockfree_spsc_queue demo_lockfree_spsc_queue.cpp)
