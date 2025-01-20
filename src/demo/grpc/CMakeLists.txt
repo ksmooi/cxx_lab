@@ -1,0 +1,4 @@
+add_subdirectory(unary_rpc)
+add_subdirectory(server_stream_rpc)
+add_subdirectory(client_stream_rpc)
+add_subdirectory(bidirect_stream_rpc)
