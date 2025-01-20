@@ -1,0 +1,27 @@
+/*
+protoc -I=../../src/demo/grpc/unary_rpc/proto \
+  --cpp_out=../../src/demo/grpc/unary_rpc/grpc \
+  --grpc_out=../../src/demo/grpc/unary_rpc/grpc \
+  --plugin=protoc-gen-grpc=`which grpc_cpp_plugin` \
+  ../../src/demo/grpc/unary_rpc/proto/hello.proto
+*/
+
+syntax = "proto3";
+
+package hello;
+
+// The greeting service definition.
+service Greeter {
+  // Sends a greeting
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings.
+message HelloReply {
+  string message = 1;
+}
