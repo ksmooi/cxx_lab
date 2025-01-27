@@ -1,0 +1,8 @@
+add_executable(demo_mongocxx_client demo_mongocxx_client.cpp)
+target_link_libraries(demo_mongocxx_client PRIVATE boost_system boost_program_options mongocxx bsoncxx)
+target_include_directories(demo_mongocxx_client PUBLIC /usr/local/include/bsoncxx/v_noabi/bsoncxx/third_party/mnmlstc)
+
+add_executable(demo_mongocxx_async demo_mongocxx_async.cpp)
+target_link_libraries(demo_mongocxx_async PRIVATE boost_system boost_program_options mongocxx bsoncxx)
+target_include_directories(demo_mongocxx_async PUBLIC /usr/local/include/bsoncxx/v_noabi/bsoncxx/third_party/mnmlstc)
+
