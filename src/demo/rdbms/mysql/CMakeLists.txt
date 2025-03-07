@@ -1,0 +1,5 @@
+add_executable(demo_mysql_without_ssl demo_mysql_without_ssl.cpp)
+target_link_libraries(demo_mysql_without_ssl PRIVATE boost_system boost_charconv boost_program_options ssl crypto)
+
+add_executable(demo_mysql_with_ssl demo_mysql_with_ssl.cpp)
+target_link_libraries(demo_mysql_with_ssl PRIVATE boost_system boost_charconv boost_program_options ssl crypto)
