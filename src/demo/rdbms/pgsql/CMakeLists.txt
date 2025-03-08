@@ -1,0 +1,9 @@
+add_executable(demo_pgsql_without_ssl demo_pgsql_without_ssl.cpp)
+target_link_libraries(demo_pgsql_without_ssl PRIVATE boost_system boost_program_options pqxx fmt)
+
+add_executable(demo_pgsql_with_ssl demo_pgsql_with_ssl.cpp)
+target_link_libraries(demo_pgsql_with_ssl PRIVATE boost_system boost_program_options pqxx fmt ssl crypto)
+
+add_executable(demo_pgsql_async demo_pgsql_async.cpp)
+target_link_libraries(demo_pgsql_async PRIVATE boost_system boost_program_options pqxx fmt)
+
