@@ -1,0 +1,5 @@
+add_executable(demo_spd_logger demo_spd_logger.cpp)
+target_link_libraries(demo_spd_logger PRIVATE spdlog boost_program_options)
+
+add_executable(demo_fmt_string demo_fmt_string.cpp)
+target_link_libraries(demo_fmt_string PRIVATE fmt boost_program_options)
