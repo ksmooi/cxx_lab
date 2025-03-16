@@ -1,0 +1,16 @@
+
+add_executable(demo_sigslot_st demo_sigslot_st.cpp)
+
+add_executable(demo_sigslot_mt demo_sigslot_mt.cpp)
+target_include_directories(demo_sigslot_mt PRIVATE ${CMAKE_SOURCE_DIR}/src/modules)
+
+add_executable(demo_signal2_connections demo_signal2_connections.cpp)
+
+add_executable(demo_signal2_document_view demo_signal2_document_view.cpp)
+
+add_executable(demo_signal2_custom_combiner demo_signal2_custom_combiner.cpp)
+
+add_executable(demo_signal2_multithreaded demo_signal2_multithreaded.cpp)
+
+
+
